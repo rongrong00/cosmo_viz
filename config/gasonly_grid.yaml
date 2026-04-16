@@ -1,0 +1,8 @@
+# Gas-only test: density + temperature, 512^3 subbox
+name: gasonly
+center: [14884.0, 17185.0, 29644.0]
+side: 5000.0
+resolution: 512
+fields:
+  - gas_density
+  - temperature

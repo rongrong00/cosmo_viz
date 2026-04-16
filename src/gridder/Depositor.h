@@ -5,8 +5,11 @@
 
 class Depositor {
 public:
-    // Deposit gas particles onto the grid using SPH kernel.
-    // Handles periodic boundary wrapping.
+    // Deposit gas particles: density, temperature, metallicity, HII, velocity, mass_weight
     static void depositGas(Grid& grid, const std::vector<GasParticle>& particles,
                            double boxsize);
+
+    // Deposit DM particles: dm_density only
+    static void depositDM(Grid& grid, const std::vector<DMParticle>& particles,
+                          double boxsize);
 };

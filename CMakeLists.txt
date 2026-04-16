@@ -33,8 +33,12 @@ add_executable(gridder
     src/gridder/SnapshotReader.cpp
     src/gridder/Grid.cpp
     src/gridder/Depositor.cpp
+    src/gridder/SmoothingLength.cpp
 )
 target_link_libraries(gridder PRIVATE common MPI::MPI_CXX)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(gridder PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 # --- Renderer ---
 add_executable(renderer

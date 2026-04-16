@@ -2,19 +2,31 @@
 #include "renderer/Camera.h"
 #include "renderer/GridReader.h"
 #include <vector>
+#include <string>
 
 class RayTracer {
 public:
-    // Trace all rays for column density projection.
-    // Returns a 2D image (height x width) as flat vector.
+    // Column density: integral of field * ds
     static std::vector<float> traceColumnDensity(const Camera& camera,
-                                                  const GridData& grid);
+                                                  const GridData& grid,
+                                                  const std::string& field);
+
+    // Mass-weighted projection: integral(rho * field * ds) / integral(rho * ds)
+    static std::vector<float> traceMassWeighted(const Camera& camera,
+                                                 const GridData& grid,
+                                                 const std::string& field,
+                                                 const std::string& weight_field);
+
+    // LOS velocity: integral(rho * v_los * ds) / integral(rho * ds)
+    static std::vector<float> traceLOSVelocity(const Camera& camera,
+                                                const GridData& grid,
+                                                const std::string& weight_field);
 
 private:
-    // DDA ray-AABB intersection: returns (tmin, tmax), or tmin > tmax if no hit
     static void rayAABBIntersect(const Ray& ray, const Box3& bbox,
                                   double& tmin, double& tmax);
 
-    // Trace a single ray through the grid, accumulating column density
-    static float traceRay(const Ray& ray, const GridData& grid);
+    // Generic single-ray DDA traversal that calls a per-cell callback
+    template <typename CellFunc>
+    static void traceRayDDA(const Ray& ray, const GridData& grid, CellFunc&& func);
 };

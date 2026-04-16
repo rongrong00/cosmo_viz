@@ -2,11 +2,13 @@
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <iomanip>
 #include <filesystem>
 #include "common/Config.h"
 #include "gridder/SnapshotReader.h"
 #include "gridder/Grid.h"
 #include "gridder/Depositor.h"
+#include "gridder/SmoothingLength.h"
 
 namespace fs = std::filesystem;
 
@@ -40,10 +42,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Create output directory
-    if (rank == 0) {
-        fs::create_directories(output_dir);
-    }
+    if (rank == 0) fs::create_directories(output_dir);
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Read header
@@ -53,6 +52,7 @@ int main(int argc, char** argv) {
                   << " z=" << header.redshift
                   << " NumFiles=" << header.num_files
                   << " NumGas=" << header.num_part_total[0]
+                  << " NumDM=" << header.num_part_total[1]
                   << std::endl;
     }
 
@@ -63,43 +63,82 @@ int main(int argc, char** argv) {
                   << " center=(" << gcfg.center.x << "," << gcfg.center.y << "," << gcfg.center.z << ")"
                   << " side=" << gcfg.side
                   << " res=" << gcfg.resolution
-                  << std::endl;
+                  << " fields:";
+        for (const auto& f : gcfg.fields) std::cout << " " << f;
+        std::cout << std::endl;
+    }
+
+    // Check which particle types we need
+    bool need_gas = false, need_dm = false;
+    for (const auto& f : gcfg.fields) {
+        if (f == "gas_density" || f == "temperature" || f == "metallicity" ||
+            f == "HII_density" || f == "gas_velocity") {
+            need_gas = true;
+        }
+        if (f == "dm_density") {
+            need_dm = true;
+        }
     }
 
     // Allocate grid
-    Grid grid(gcfg.center, gcfg.side, gcfg.resolution);
+    Grid grid(gcfg.center, gcfg.side, gcfg.resolution, gcfg.fields);
 
-    // Distribute subfiles round-robin across MPI ranks
+    // Process subfiles round-robin
     for (int fi = rank; fi < header.num_files; fi += nranks) {
         std::string subfile = SnapshotReader::subfilePath(snapshot_path, fi);
-        if (rank == 0 || nranks == 1) {
-            std::cout << "Reading subfile " << fi << ": " << subfile << std::endl;
+        std::cout << "Rank " << rank << " reading subfile " << fi << std::endl;
+
+        if (need_gas) {
+            auto gas = SnapshotReader::readGasParticles(subfile, header.boxsize);
+            std::cout << "  Rank " << rank << " subfile " << fi
+                      << ": " << gas.size() << " gas particles" << std::endl;
+            Depositor::depositGas(grid, gas, header.boxsize);
         }
 
-        auto particles = SnapshotReader::readGasParticles(subfile, header.boxsize);
-        std::cout << "  Rank " << rank << " subfile " << fi
-                  << ": " << particles.size() << " gas particles" << std::endl;
-
-        Depositor::depositGas(grid, particles, header.boxsize);
+        if (need_dm) {
+            auto dm = SnapshotReader::readDMParticles(subfile, header.boxsize);
+            std::cout << "  Rank " << rank << " subfile " << fi
+                      << ": " << dm.size() << " DM particles" << std::endl;
+            // Compute smoothing lengths
+            SmoothingLength::computeKNN(dm, header.boxsize);
+            Depositor::depositDM(grid, dm, header.boxsize);
+        }
     }
 
-    // MPI_Reduce all grids to rank 0
-    size_t grid_size = static_cast<size_t>(gcfg.resolution) * gcfg.resolution * gcfg.resolution;
+    // MPI_Reduce all field buffers to rank 0
+    size_t grid_size = grid.totalCells();
     if (nranks > 1) {
-        if (rank == 0) {
-            std::vector<double> global(grid_size, 0.0);
-            MPI_Reduce(grid.densityBuf().data(), global.data(), grid_size,
-                       MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-            grid.densityBuf() = std::move(global);
-        } else {
-            MPI_Reduce(grid.densityBuf().data(), nullptr, grid_size,
-                       MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        // Gather all field names (including mass_weight and velocity components)
+        std::vector<std::string> all_fields;
+        for (const auto& f : gcfg.fields) {
+            if (f == "gas_velocity") {
+                all_fields.push_back("gas_velocity_x");
+                all_fields.push_back("gas_velocity_y");
+                all_fields.push_back("gas_velocity_z");
+            } else {
+                all_fields.push_back(f);
+            }
+        }
+        all_fields.push_back("mass_weight");
+
+        for (const auto& fname : all_fields) {
+            if (!grid.hasField(fname)) continue;
+            if (rank == 0) {
+                std::vector<double> global(grid_size, 0.0);
+                MPI_Reduce(grid.fieldData(fname), global.data(), grid_size,
+                           MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+                grid.field(fname) = std::move(global);
+            } else {
+                MPI_Reduce(grid.fieldData(fname), nullptr, grid_size,
+                           MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            }
         }
     }
 
-    // Write output
+    // Normalize and write on rank 0
     if (rank == 0) {
-        // Extract snapshot number from path
+        grid.normalizeIntensiveFields();
+
         int snap_num = 0;
         std::string base = fs::path(snapshot_path).filename().string();
         auto pos = base.find('_');

@@ -33,36 +33,53 @@ int main(int argc, char** argv) {
 
     fs::create_directories(output_dir);
 
-    // Read grid
-    GridData grid = GridReader::read(grid_path);
-
-    // Parse camera config
+    // Parse camera and projection configs
     CameraConfig cam_cfg = parseCameraConfig(camera_path);
     auto projections = parseProjectionConfigs(camera_path);
 
+    // Collect all fields needed
+    std::vector<std::string> needed_fields;
+    for (const auto& proj : projections) {
+        needed_fields.push_back(proj.field);
+        // Mass-weighted projections need a weight field (gas_density by default)
+        if (proj.mode == "mass_weighted") {
+            needed_fields.push_back("gas_density");
+        }
+        if (proj.mode == "los_velocity") {
+            needed_fields.push_back("gas_density");
+            needed_fields.push_back("gas_velocity_x");
+            needed_fields.push_back("gas_velocity_y");
+            needed_fields.push_back("gas_velocity_z");
+        }
+    }
+
+    // Read grid with needed fields
+    GridData grid = GridReader::read(grid_path, needed_fields);
+
     std::cout << "Camera: type=" << cam_cfg.type
               << " pos=(" << cam_cfg.position.x << "," << cam_cfg.position.y << "," << cam_cfg.position.z << ")"
-              << " look_at=(" << cam_cfg.look_at.x << "," << cam_cfg.look_at.y << "," << cam_cfg.look_at.z << ")"
-              << " ortho_width=" << cam_cfg.ortho_width
               << " image=" << cam_cfg.image_width << "x" << cam_cfg.image_height
               << std::endl;
 
     Camera camera(cam_cfg);
 
-    // For each projection
     for (const auto& proj : projections) {
         std::cout << "Projection: field=" << proj.field << " mode=" << proj.mode << std::endl;
 
         std::vector<float> image;
+
         if (proj.mode == "column") {
-            image = RayTracer::traceColumnDensity(camera, grid);
+            image = RayTracer::traceColumnDensity(camera, grid, proj.field);
+        } else if (proj.mode == "mass_weighted") {
+            image = RayTracer::traceMassWeighted(camera, grid, proj.field, "gas_density");
+        } else if (proj.mode == "los_velocity") {
+            image = RayTracer::traceLOSVelocity(camera, grid, "gas_density");
         } else {
             std::cerr << "Warning: unsupported projection mode '" << proj.mode
                       << "', skipping." << std::endl;
             continue;
         }
 
-        // Build output filename
         std::string grid_name = fs::path(grid_path).stem().string();
         std::string out_file = output_dir + "/projection_" + grid_name + "_" + proj.field + ".hdf5";
         ImageWriter::write(out_file, image, cam_cfg.image_width, cam_cfg.image_height,

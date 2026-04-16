@@ -83,8 +83,15 @@ static KVMap readKVFile(const std::string& filename) {
             list_items.clear();
         }
 
-        // Skip section headers like "grids:", "camera:", "projections:"
+        // Handle "key:" (no value) — could be section header or list start
         if (t.back() == ':' && t.find(": ") == std::string::npos) {
+            // Flush any pending list
+            if (!current_list_key.empty() && !list_items.empty()) {
+                kvs.push_back({current_list_key, "[" + list_items + "]"});
+                list_items.clear();
+            }
+            // Set as potential list key (next lines might be "- item")
+            current_list_key = t.substr(0, t.size() - 1);
             continue;
         }
 

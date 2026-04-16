@@ -5,10 +5,20 @@
 #include "common/Vec3.h"
 
 struct GasParticle {
-    Vec3 pos;        // in code units (ckpc/h)
+    Vec3 pos;
     float mass;
     float density;
-    float hsml;      // smoothing length, computed from Volume = Mass/Density
+    float hsml;
+    float internal_energy;
+    float metallicity;
+    float hii_fraction;
+    Vec3 velocity;
+};
+
+struct DMParticle {
+    Vec3 pos;
+    float mass;
+    float hsml;  // set later via kNN
 };
 
 struct SnapshotHeader {
@@ -24,16 +34,11 @@ struct SnapshotHeader {
 
 class SnapshotReader {
 public:
-    // Read header from first subfile
     static SnapshotHeader readHeader(const std::string& snapshot_path);
-
-    // Read gas particles from a single subfile
     static std::vector<GasParticle> readGasParticles(const std::string& subfile_path,
                                                       double boxsize);
-
-    // Get the number of subfiles
+    static std::vector<DMParticle> readDMParticles(const std::string& subfile_path,
+                                                    double boxsize);
     static int getNumFiles(const std::string& snapshot_path);
-
-    // Build subfile path: /path/to/snapdir_NNN/snap_NNN.K.hdf5
     static std::string subfilePath(const std::string& snapshot_path, int file_index);
 };
