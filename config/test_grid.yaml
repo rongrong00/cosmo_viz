@@ -1,0 +1,7 @@
+# Test grid — full box at low resolution
+name: test
+center: [18122.5, 18122.5, 18122.5]
+side: 36245.0
+resolution: 128
+fields:
+  - gas_density

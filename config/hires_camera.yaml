@@ -1,0 +1,14 @@
+# Perspective camera — looking at box center from a corner
+camera:
+  type: perspective
+  position: [-5000.0, -5000.0, -5000.0]
+  look_at: [18122.5, 18122.5, 18122.5]
+  up: [0, 1, 0]
+  fov: 35.0
+  ortho_width: 36245.0
+  image_width: 2048
+  image_height: 2048
+
+projections:
+  - field: gas_density
+    mode: column

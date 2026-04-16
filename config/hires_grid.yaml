@@ -1,0 +1,7 @@
+# High-resolution grid — full box 1024^3
+name: hires
+center: [18122.5, 18122.5, 18122.5]
+side: 36245.0
+resolution: 1024
+fields:
+  - gas_density

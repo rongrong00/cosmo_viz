@@ -1,0 +1,14 @@
+# Camera configuration — orthographic, looking along z-axis
+camera:
+  type: orthographic
+  position: [18122.5, 18122.5, 0.0]
+  look_at: [18122.5, 18122.5, 18122.5]
+  up: [0, 1, 0]
+  fov: 60.0
+  ortho_width: 36245.0
+  image_width: 1024
+  image_height: 1024
+
+projections:
+  - field: gas_density
+    mode: column

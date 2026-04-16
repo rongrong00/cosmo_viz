@@ -1,0 +1,9 @@
+# Grid configuration for the 50 cMpc/h Lumina EDE test box
+# BoxSize = 36245 ckpc/h ≈ 50 cMpc/h
+# Center the grid on the full box
+name: full_box
+center: [18122.5, 18122.5, 18122.5]
+side: 36245.0
+resolution: 256
+fields:
+  - gas_density

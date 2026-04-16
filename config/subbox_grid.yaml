@@ -1,0 +1,7 @@
+# Subbox centered on densest region, 5 cMpc/h side, 1024^3
+name: subbox
+center: [14884.0, 17185.0, 29644.0]
+side: 5000.0
+resolution: 1024
+fields:
+  - gas_density
