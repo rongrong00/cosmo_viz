@@ -1,0 +1,8 @@
+# Zoom tier 1 (wide): full-box grid centered on largest FOF halo at snap 121.
+# Cluster GroupPos = [4093.16, 23556.48, 10679.74]; BoxSize = 36245.0 ckpc/h.
+name: zoom_wide
+center: [4093.16, 23556.48, 10679.74]
+side: 36245.0
+resolution: 1024
+fields:
+  - gas_density

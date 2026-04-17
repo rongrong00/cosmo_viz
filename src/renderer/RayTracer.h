@@ -26,7 +26,9 @@ private:
     static void rayAABBIntersect(const Ray& ray, const Box3& bbox,
                                   double& tmin, double& tmax);
 
-    // Generic single-ray DDA traversal that calls a per-cell callback
+    // Generic single-ray DDA traversal that calls a per-cell callback.
+    // If camera has a LOS slab, integration is clipped to the slab range.
     template <typename CellFunc>
-    static void traceRayDDA(const Ray& ray, const GridData& grid, CellFunc&& func);
+    static void traceRayDDA(const Ray& ray, const Camera& camera,
+                            const GridData& grid, CellFunc&& func);
 };

@@ -20,6 +20,10 @@ public:
     std::vector<double> readDatasetDouble(const std::string& name);
     std::vector<uint32_t> readDatasetUint32(const std::string& name);
 
+    // Read a float dataset into a pre-allocated buffer (for shared-memory use).
+    // Throws if the dataset element count != expected_n.
+    void readDatasetFloatInto(const std::string& name, float* out, size_t expected_n);
+
     // Get dataset dimensions
     std::vector<hsize_t> getDatasetDims(const std::string& name);
 

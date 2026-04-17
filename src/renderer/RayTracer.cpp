@@ -30,33 +30,43 @@ void RayTracer::rayAABBIntersect(const Ray& ray, const Box3& bbox,
 }
 
 template <typename CellFunc>
-void RayTracer::traceRayDDA(const Ray& ray, const GridData& grid, CellFunc&& func) {
+void RayTracer::traceRayDDA(const Ray& ray, const Camera& camera,
+                             const GridData& grid, CellFunc&& func) {
     double tmin, tmax;
     rayAABBIntersect(ray, grid.bbox, tmin, tmax);
     if (tmin >= tmax) return;
+
+    // Optional LOS slab clipping
+    double t_slab0, t_slab1;
+    camera.slabTRange(ray, t_slab0, t_slab1);
+    tmin = std::max(tmin, t_slab0);
+    tmax = std::min(tmax, t_slab1);
+    if (tmin >= tmax) return;
+
     if (tmin < 0.0) tmin = 0.0;
 
-    int N = grid.resolution;
-    double cs = grid.cell_size;
+    int Nx = grid.nx, Ny = grid.ny, Nz = grid.nz;
+    double csx = grid.cell_size.x, csy = grid.cell_size.y, csz = grid.cell_size.z;
+    double cs_min = std::min({csx, csy, csz});
     const Vec3& lo = grid.bbox.lo;
 
-    Vec3 entry = ray.origin + ray.dir * (tmin + 1e-10 * cs);
+    Vec3 entry = ray.origin + ray.dir * (tmin + 1e-10 * cs_min);
 
-    int ix = std::clamp((int)std::floor((entry.x - lo.x) / cs), 0, N - 1);
-    int iy = std::clamp((int)std::floor((entry.y - lo.y) / cs), 0, N - 1);
-    int iz = std::clamp((int)std::floor((entry.z - lo.z) / cs), 0, N - 1);
+    int ix = std::clamp((int)std::floor((entry.x - lo.x) / csx), 0, Nx - 1);
+    int iy = std::clamp((int)std::floor((entry.y - lo.y) / csy), 0, Ny - 1);
+    int iz = std::clamp((int)std::floor((entry.z - lo.z) / csz), 0, Nz - 1);
 
     int step_x = (ray.dir.x >= 0) ? 1 : -1;
     int step_y = (ray.dir.y >= 0) ? 1 : -1;
     int step_z = (ray.dir.z >= 0) ? 1 : -1;
 
-    double tDelta_x = (std::fabs(ray.dir.x) > 1e-15) ? cs / std::fabs(ray.dir.x) : 1e30;
-    double tDelta_y = (std::fabs(ray.dir.y) > 1e-15) ? cs / std::fabs(ray.dir.y) : 1e30;
-    double tDelta_z = (std::fabs(ray.dir.z) > 1e-15) ? cs / std::fabs(ray.dir.z) : 1e30;
+    double tDelta_x = (std::fabs(ray.dir.x) > 1e-15) ? csx / std::fabs(ray.dir.x) : 1e30;
+    double tDelta_y = (std::fabs(ray.dir.y) > 1e-15) ? csy / std::fabs(ray.dir.y) : 1e30;
+    double tDelta_z = (std::fabs(ray.dir.z) > 1e-15) ? csz / std::fabs(ray.dir.z) : 1e30;
 
-    double next_x = lo.x + ((ray.dir.x >= 0) ? (ix + 1) : ix) * cs;
-    double next_y = lo.y + ((ray.dir.y >= 0) ? (iy + 1) : iy) * cs;
-    double next_z = lo.z + ((ray.dir.z >= 0) ? (iz + 1) : iz) * cs;
+    double next_x = lo.x + ((ray.dir.x >= 0) ? (ix + 1) : ix) * csx;
+    double next_y = lo.y + ((ray.dir.y >= 0) ? (iy + 1) : iy) * csy;
+    double next_z = lo.z + ((ray.dir.z >= 0) ? (iz + 1) : iz) * csz;
 
     double tMax_x = (std::fabs(ray.dir.x) > 1e-15) ? (next_x - ray.origin.x) / ray.dir.x : 1e30;
     double tMax_y = (std::fabs(ray.dir.y) > 1e-15) ? (next_y - ray.origin.y) / ray.dir.y : 1e30;
@@ -64,12 +74,12 @@ void RayTracer::traceRayDDA(const Ray& ray, const GridData& grid, CellFunc&& fun
 
     double t_current = tmin;
 
-    while (ix >= 0 && ix < N && iy >= 0 && iy < N && iz >= 0 && iz < N && t_current < tmax) {
+    while (ix >= 0 && ix < Nx && iy >= 0 && iy < Ny && iz >= 0 && iz < Nz && t_current < tmax) {
         double t_next = std::min({tMax_x, tMax_y, tMax_z, tmax});
         double ds = t_next - t_current;
         if (ds < 0) ds = 0;
 
-        size_t idx = static_cast<size_t>(iz) * N * N + static_cast<size_t>(iy) * N + ix;
+        size_t idx = (static_cast<size_t>(iz) * Ny + iy) * Nx + ix;
         func(idx, ds);
 
         t_current = t_next;
@@ -91,14 +101,15 @@ std::vector<float> RayTracer::traceColumnDensity(const Camera& camera,
     std::vector<float> image(H * W, 0.0f);
     const auto& fdata = grid.getField(field);
 
-    std::cout << "Ray tracing column density: " << field << " (" << W << "x" << H << ")" << std::endl;
+    std::cout << "Ray tracing column density: " << field << " (" << W << "x" << H << ")"
+              << " los_slab=" << camera.losSlab() << std::endl;
 
     #pragma omp parallel for schedule(dynamic, 4)
     for (int py = 0; py < H; py++) {
         for (int px = 0; px < W; px++) {
             Ray ray = camera.generateRay(px, py);
             double accum = 0.0;
-            traceRayDDA(ray, grid, [&](size_t idx, double ds) {
+            traceRayDDA(ray, camera, grid, [&](size_t idx, double ds) {
                 accum += fdata[idx] * ds;
             });
             image[py * W + px] = static_cast<float>(accum);
@@ -122,14 +133,15 @@ std::vector<float> RayTracer::traceMassWeighted(const Camera& camera,
     const auto& wdata = grid.getField(weight_field);
 
     std::cout << "Ray tracing mass-weighted: " << field << " weighted by " << weight_field
-              << " (" << W << "x" << H << ")" << std::endl;
+              << " (" << W << "x" << H << ")"
+              << " los_slab=" << camera.losSlab() << std::endl;
 
     #pragma omp parallel for schedule(dynamic, 4)
     for (int py = 0; py < H; py++) {
         for (int px = 0; px < W; px++) {
             Ray ray = camera.generateRay(px, py);
             double num = 0.0, den = 0.0;
-            traceRayDDA(ray, grid, [&](size_t idx, double ds) {
+            traceRayDDA(ray, camera, grid, [&](size_t idx, double ds) {
                 double w = wdata[idx] * ds;
                 num += fdata[idx] * w;
                 den += w;
@@ -156,7 +168,8 @@ std::vector<float> RayTracer::traceLOSVelocity(const Camera& camera,
     const auto& wdata = grid.getField(weight_field);
     Vec3 n = camera.forward(); // LOS direction
 
-    std::cout << "Ray tracing LOS velocity (" << W << "x" << H << ")" << std::endl;
+    std::cout << "Ray tracing LOS velocity (" << W << "x" << H << ")"
+              << " los_slab=" << camera.losSlab() << std::endl;
 
     #pragma omp parallel for schedule(dynamic, 4)
     for (int py = 0; py < H; py++) {
@@ -165,7 +178,7 @@ std::vector<float> RayTracer::traceLOSVelocity(const Camera& camera,
             // For perspective, use the actual ray direction; for ortho, use camera forward
             Vec3 los = ray.dir;
             double num = 0.0, den = 0.0;
-            traceRayDDA(ray, grid, [&](size_t idx, double ds) {
+            traceRayDDA(ray, camera, grid, [&](size_t idx, double ds) {
                 double v_los = vx[idx] * los.x + vy[idx] * los.y + vz[idx] * los.z;
                 double w = wdata[idx] * ds;
                 num += v_los * w;

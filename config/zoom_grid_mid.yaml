@@ -1,0 +1,8 @@
+# Zoom tier 3 (mid): 8 cMpc/h xy slab, full-box LOS.
+# 1024x1024x1024 => cell_xy = 7.81 ckpc/h, cell_z = 35.40 ckpc/h.
+name: zoom_mid
+center: [4093.16, 23556.48, 10679.74]
+size: [8000.0, 8000.0, 36245.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

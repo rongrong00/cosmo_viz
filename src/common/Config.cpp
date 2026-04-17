@@ -134,8 +134,31 @@ GridConfig parseGridConfig(const std::string& filename) {
 
     auto c = parseArray(getVal(kvs, "center", "[0,0,0]"));
     g.center = Vec3(c[0], c[1], c[2]);
-    g.side = std::stod(getVal(kvs, "side", "1000"));
-    g.resolution = std::stoi(getVal(kvs, "resolution", "256"));
+
+    // size: accept either scalar `side: X` (cube) or `size: [sx, sy, sz]`.
+    std::string size_str = getVal(kvs, "size", "");
+    if (!size_str.empty()) {
+        auto sv = parseArray(size_str);
+        if (sv.size() != 3)
+            throw std::runtime_error("grid `size` must be a 3-element array");
+        g.size = Vec3(sv[0], sv[1], sv[2]);
+    } else {
+        double side = std::stod(getVal(kvs, "side", "1000"));
+        g.size = Vec3(side, side, side);
+    }
+
+    // shape: accept scalar `resolution: N` (cube) or `resolution: [nx, ny, nz]`.
+    std::string res_str = getVal(kvs, "resolution", "256");
+    if (res_str.find('[') != std::string::npos) {
+        auto rv = parseArray(res_str);
+        if (rv.size() != 3)
+            throw std::runtime_error("grid `resolution` array must have 3 entries");
+        g.shape[0] = (int)rv[0]; g.shape[1] = (int)rv[1]; g.shape[2] = (int)rv[2];
+    } else {
+        int n = std::stoi(res_str);
+        g.shape[0] = g.shape[1] = g.shape[2] = n;
+    }
+
     g.fields = parseStringArray(getVal(kvs, "fields", "[gas_density]"));
     return g;
 }
@@ -157,6 +180,7 @@ CameraConfig parseCameraConfig(const std::string& filename) {
     cam.ortho_width = std::stod(getVal(kvs, "ortho_width", "1000"));
     cam.image_width = std::stoi(getVal(kvs, "image_width", "1024"));
     cam.image_height = std::stoi(getVal(kvs, "image_height", "1024"));
+    cam.los_slab = std::stod(getVal(kvs, "los_slab", "0"));
     return cam;
 }
 

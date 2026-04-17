@@ -14,6 +14,11 @@ struct Box3 {
         return {center - half, center + half};
     }
 
+    static Box3 fromCenterSize(const Vec3& center, const Vec3& size) {
+        Vec3 half(size.x / 2, size.y / 2, size.z / 2);
+        return {center - half, center + half};
+    }
+
     bool contains(const Vec3& p) const {
         return p.x >= lo.x && p.x <= hi.x &&
                p.y >= lo.y && p.y <= hi.y &&

@@ -1,0 +1,7 @@
+# Same-y tier 1: full-box xy and full-box z so per-frame los_slab can vary.
+name: zoom_wide
+center: [4093.16, 23556.48, 10679.74]
+size: [36245.0, 36245.0, 36245.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

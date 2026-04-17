@@ -3,61 +3,87 @@
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
+#include <cstring>
 
-Grid::Grid(const Vec3& center, double side, int resolution,
+std::vector<std::string> Grid::allocatedFieldNames(
+    const std::vector<std::string>& field_names) {
+    std::vector<std::string> out;
+    for (const auto& name : field_names) {
+        if (name == "gas_velocity") {
+            out.push_back("gas_velocity_x");
+            out.push_back("gas_velocity_y");
+            out.push_back("gas_velocity_z");
+        } else {
+            out.push_back(name);
+        }
+    }
+    out.push_back("mass_weight");
+    return out;
+}
+
+Grid::Grid(const Vec3& center, const Vec3& size, int nx, int ny, int nz,
            const std::vector<std::string>& field_names)
-    : center_(center), side_(side), N_(resolution),
-      cell_size_(side / resolution),
-      bbox_(Box3::fromCenterSide(center, side)),
+    : center_(center), size_(size), nx_(nx), ny_(ny), nz_(nz),
+      cell_size_(size.x / nx, size.y / ny, size.z / nz),
+      bbox_(Box3::fromCenterSize(center, size)),
       field_names_(field_names) {
     size_t total = totalCells();
 
-    // Always allocate mass_weight for normalizing intensive fields
-    fields_["mass_weight"].resize(total, 0.0);
-
-    for (const auto& name : field_names) {
-        fields_[name].resize(total, 0.0);
-        // Vector fields: also allocate _x, _y, _z
-        if (name == "gas_velocity") {
-            fields_["gas_velocity_x"].resize(total, 0.0);
-            fields_["gas_velocity_y"].resize(total, 0.0);
-            fields_["gas_velocity_z"].resize(total, 0.0);
-        }
+    // Self-allocate one zeroed buffer per needed field.
+    auto needed = allocatedFieldNames(field_names);
+    owned_.reserve(needed.size());
+    for (const auto& name : needed) {
+        auto buf = std::unique_ptr<double[]>(new double[total]());
+        fields_[name] = buf.get();
+        owned_.push_back(std::move(buf));
     }
 
     size_t num_buffers = fields_.size();
     double mem_mb = (total * sizeof(double) * num_buffers) / (1024.0 * 1024.0);
-    std::cout << "Grid allocated: " << N_ << "^3 = " << total << " cells, "
-              << num_buffers << " fields (" << mem_mb << " MB)" << std::endl;
+    std::cout << "Grid allocated: " << nx_ << "x" << ny_ << "x" << nz_
+              << " = " << total << " cells, "
+              << num_buffers << " fields (" << mem_mb << " MB), "
+              << "cell=(" << cell_size_.x << "," << cell_size_.y << "," << cell_size_.z << ")"
+              << std::endl;
+}
+
+Grid::Grid(const Vec3& center, const Vec3& size, int nx, int ny, int nz,
+           const std::vector<std::string>& field_names,
+           const std::map<std::string, double*>& buffers)
+    : center_(center), size_(size), nx_(nx), ny_(ny), nz_(nz),
+      cell_size_(size.x / nx, size.y / ny, size.z / nz),
+      bbox_(Box3::fromCenterSize(center, size)),
+      field_names_(field_names) {
+    for (const auto& name : allocatedFieldNames(field_names)) {
+        auto it = buffers.find(name);
+        if (it == buffers.end())
+            throw std::runtime_error("external buffer missing for field: " + name);
+        fields_[name] = it->second;
+    }
 }
 
 bool Grid::hasField(const std::string& name) const {
     return fields_.count(name) > 0;
 }
 
-std::vector<double>& Grid::field(const std::string& name) {
-    auto it = fields_.find(name);
-    if (it == fields_.end())
-        throw std::runtime_error("Grid field not found: " + name);
-    return it->second;
-}
-
-const std::vector<double>& Grid::field(const std::string& name) const {
-    auto it = fields_.find(name);
-    if (it == fields_.end())
-        throw std::runtime_error("Grid field not found: " + name);
-    return it->second;
-}
-
 double* Grid::fieldData(const std::string& name) {
-    return field(name).data();
+    auto it = fields_.find(name);
+    if (it == fields_.end())
+        throw std::runtime_error("Grid field not found: " + name);
+    return it->second;
+}
+
+const double* Grid::fieldData(const std::string& name) const {
+    auto it = fields_.find(name);
+    if (it == fields_.end())
+        throw std::runtime_error("Grid field not found: " + name);
+    return it->second;
 }
 
 void Grid::normalizeIntensiveFields() {
     size_t total = totalCells();
-    const auto& mw = fields_["mass_weight"];
+    const double* mw = fieldData("mass_weight");
 
-    // Intensive (mass-weighted) fields that need normalization
     std::vector<std::string> intensive = {
         "temperature", "metallicity",
         "gas_velocity_x", "gas_velocity_y", "gas_velocity_z"
@@ -65,11 +91,9 @@ void Grid::normalizeIntensiveFields() {
 
     for (const auto& fname : intensive) {
         if (!hasField(fname)) continue;
-        auto& f = fields_[fname];
+        double* f = fieldData(fname);
         for (size_t i = 0; i < total; i++) {
-            if (mw[i] > 0.0) {
-                f[i] /= mw[i];
-            }
+            if (mw[i] > 0.0) f[i] /= mw[i];
         }
     }
     std::cout << "Normalized intensive fields by mass_weight." << std::endl;
@@ -82,9 +106,13 @@ void Grid::writeHDF5(const std::string& filename, double redshift, double scale_
 
     writer.createGroup("Header");
     writer.writeAttrDoubleArray("Header", "center", {center_.x, center_.y, center_.z});
-    writer.writeAttrDouble("Header", "side", side_);
-    writer.writeAttrInt("Header", "resolution", N_);
-    writer.writeAttrDouble("Header", "cell_size", cell_size_);
+    writer.writeAttrDoubleArray("Header", "size", {size_.x, size_.y, size_.z});
+    writer.writeAttrDouble("Header", "side", size_.x);
+    writer.writeAttrDoubleArray("Header", "shape",
+                                {(double)nx_, (double)ny_, (double)nz_});
+    writer.writeAttrInt("Header", "resolution", nx_);
+    writer.writeAttrDoubleArray("Header", "cell_size",
+                                {cell_size_.x, cell_size_.y, cell_size_.z});
     writer.writeAttrDouble("Header", "redshift", redshift);
     writer.writeAttrDouble("Header", "scale_factor", scale_factor);
     writer.writeAttrInt("Header", "snapshot", snapshot_num);
@@ -95,16 +123,14 @@ void Grid::writeHDF5(const std::string& filename, double redshift, double scale_
 
     size_t total = totalCells();
 
-    // Write each field
-    for (const auto& [name, data] : fields_) {
-        // Skip gas_velocity parent entry (we write _x, _y, _z instead)
+    for (const auto& [name, ptr] : fields_) {
         if (name == "gas_velocity") continue;
 
         std::vector<float> data_f32(total);
         for (size_t i = 0; i < total; i++) {
-            data_f32[i] = static_cast<float>(data[i]);
+            data_f32[i] = static_cast<float>(ptr[i]);
         }
-        writer.writeDataset3D(name, data_f32, N_, N_, N_);
+        writer.writeDataset3D(name, data_f32, nz_, ny_, nx_);
     }
 
     std::cout << "Wrote " << fields_.size() << " fields to " << filename << std::endl;

@@ -12,6 +12,176 @@ The separation means you pay the expensive snapshot I/O cost once, then render m
 
 ---
 
+## Recent Updates (April 16, 2026)
+
+### Zoom Movie Workflow
+
+- Added a deep 16:9 zoom workflow with more tiers and more frames.
+- Added automatic lead-in trimming so output starts at the first frame where the 16:9 view is fully covered.
+- Added full-bleed plotting mode so rendered PNG frames fill the canvas (no dark rim from figure margins).
+- Added depth-mode control for LOS slab:
+  - `fixed`: use a constant slab (`--los-slab`).
+  - `same-as-y`: set z depth equal to per-frame orthographic y extent.
+
+### Updated Files
+
+- Main zoom generator: `python/zoom_frames.py`
+  - New options: `--los-depth`, `--los-slab`, `--render-parallelism`, `--tier-set`, `--trim-start-frame`, `--full-bleed`.
+  - Tier render calls can now run concurrently (`--render-parallelism > 1`).
+- Deep run driver: `run_zoom16_deep.sh`
+  - Environment-configurable depth mode and slab (`LOS_DEPTH_MODE`, `LOS_SLAB`).
+  - Uses multi-node tier fanout by default with:
+    - `RENDER_PARALLELISM=4`
+    - `RENDER_LAUNCHER="srun --exclusive -N 1 -n 8 -c 4"`
+- Convenience submission wrappers:
+  - `run_zoom16_fixed10k.sh`
+  - `run_zoom16_samey.sh`
+- New deep-tier grid configs (10 Mpc z extent used for fixed-depth grids):
+  - `config/zoom_grid_10mpc_wide.yaml`
+  - `config/zoom_grid_10mpc_t2.yaml`
+  - `config/zoom_grid_10mpc_mid.yaml`
+  - `config/zoom_grid_10mpc_t4.yaml`
+  - `config/zoom_grid_10mpc_close.yaml`
+  - `config/zoom_grid_10mpc_t5.yaml`
+  - `config/zoom_grid_10mpc_t6.yaml`
+
+### How To Run
+
+- Fixed depth run (10,000 ckpc/h slab):
+
+```bash
+sbatch run_zoom16_fixed10k.sh
+```
+
+- Same-as-y depth run:
+
+```bash
+sbatch run_zoom16_samey.sh
+```
+
+### Regrid / Reuse Controls
+
+- Rebuild deep grids (default): `REGRID=1`.
+- Reuse existing deep grids:
+
+```bash
+REGRID=0 sbatch run_zoom16_fixed10k.sh
+REGRID=0 sbatch run_zoom16_samey.sh
+```
+
+### Tuning Notes
+
+- If queue limits or node pressure are high, reduce node fanout by lowering either:
+  - `RENDER_PARALLELISM`
+  - `RENDER_LAUNCHER` node/rank request
+- If walltime is dominated by plotting/encoding, adding render nodes yields diminishing returns.
+
+### C++ Engine Changes
+
+The gridder and renderer were reworked to support the deep-zoom workflow
+and to scale beyond a single node. All changes are backwards compatible
+with legacy scalar `side`/`resolution` configs and HDF5 headers.
+
+#### Anisotropic grids
+
+`GridConfig` (`src/common/Config.{h,cpp}`) now stores a `Vec3 size` and
+`int shape[3]` instead of a scalar `side` + `resolution`. YAML accepts
+either form:
+
+```yaml
+# legacy (still works; replicated to all axes)
+side: 10000
+resolution: 512
+
+# anisotropic
+size: [40000, 40000, 10000]
+resolution: [1024, 1024, 256]
+```
+
+`Grid`, `Depositor`, `GridReader`, `RayTracer`, and the HDF5 writer/reader
+were all updated to carry per-axis cell sizes. HDF5 headers now carry
+`size`, `shape`, and vector `cell_size` attributes; scalar `side` and
+`resolution` are also written for backward compatibility.
+
+New helpers:
+- `Box3::fromCenterSize(center, Vec3 size)` (`src/common/Box3.h`).
+- `Grid::allocatedFieldNames(field_names)` — the canonical list of buffers
+  a grid needs for a given requested field list (expands `gas_velocity` →
+  `_x/_y/_z` and always appends `mass_weight`).
+
+#### MPI shared-memory grid (gridder + renderer)
+
+Both executables now split `MPI_COMM_WORLD` into a per-node communicator
+(`MPI_Comm_split_type(..., MPI_COMM_TYPE_SHARED, ...)`) and allocate grid
+buffers with `MPI_Win_allocate_shared`. N ranks on the same node share one
+buffer per field instead of each holding a full copy. This is what made
+deep grids (10 Mpc slab at high resolution) fit on Frontier nodes.
+
+- Gridder (`src/gridder/main.cpp`, `src/gridder/Grid.{h,cpp}`):
+  - `Grid` has a second constructor that accepts a `map<string, double*>`
+    of externally-owned buffers (the shared-memory path). The
+    self-allocating constructor still exists for single-rank use.
+  - Reduction runs only across **node leaders** (a sub-communicator of
+    `node_rank == 0` ranks), so the all-reduce cost is
+    `(num_nodes - 1) * grid_bytes` rather than
+    `(world_size - 1) * grid_bytes`.
+  - OpenMP atomic adds in `Depositor` make concurrent per-node deposition
+    from many ranks into the same shared buffer safe.
+- Renderer (`src/renderer/main.cpp`, `src/renderer/GridReader.{h,cpp}`):
+  - New `GridReader::readHeader` (metadata only) and
+    `GridReader::readFieldsInto(filename, names, buffers)` read datasets
+    directly into caller-provided buffers.
+  - `HDF5Reader::readDatasetFloatInto(name, out, expected_n)` underpins
+    the above (`src/common/HDF5IO.{h,cpp}`).
+  - Node leader reads fields once into shared memory; all ranks on the
+    node then render against the same buffer.
+  - `renderer` now links `MPI::MPI_CXX` (`CMakeLists.txt`).
+
+#### OpenMP-parallel deposition
+
+`Depositor::depositGas` and `depositDM` (`src/gridder/Depositor.cpp`) are
+now `#pragma omp parallel for schedule(dynamic, 256)` over particles, with
+`#pragma omp atomic` on every field accumulation. This is thread-safe for
+both intra-rank parallelism and inter-rank shared-memory deposition.
+
+Smoothing length is additionally clamped to
+`h_min = 0.5 * min(cell_size)` so particles smaller than a cell are not
+dropped by the kernel-support test on anisotropic thin-slab grids.
+
+#### Batch rendering (many cameras per grid read)
+
+`renderer` now accepts `--camera-list <file>` where each line is
+`<camera.yaml> <output_dir>` (blank lines and `#` comments ignored). The
+grid is read once into shared memory; jobs are distributed round-robin
+across world ranks. Example:
+
+```
+# cameras.txt
+config/orbit_frames/cam_0000.yaml  frames/0000
+config/orbit_frames/cam_0001.yaml  frames/0001
+```
+
+```bash
+srun -N 4 -n 32 ./renderer --grid deep.hdf5 --camera-list cameras.txt
+```
+
+The single-frame `--camera cam.yaml --output dir` form still works.
+Optional `--fields a,b,c` overrides the auto-derived field set.
+
+#### LOS slab clipping
+
+`CameraConfig` has a new optional `los_slab` (code units). When `> 0`,
+ray integration is clipped to a slab of that thickness centered on
+`look_at` along the camera forward axis. `Camera::slabTRange(ray, t0, t1)`
+computes the per-ray clip range; `RayTracer::traceRayDDA` intersects it
+with the AABB range before DDA traversal. This is what the Python
+`--los-depth same-as-y` / `--los-slab` flags feed into at the C++ layer.
+
+`los_slab = 0` (default) disables the clip and integrates the full grid
+depth, matching pre-change behavior.
+
+---
+
 ## Directory Structure
 
 ```

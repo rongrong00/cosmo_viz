@@ -1,0 +1,7 @@
+# Same-y tier 5: 2 cMpc/h xy with full-box z.
+name: zoom_close
+center: [4093.16, 23556.48, 10679.74]
+size: [2000.0, 2000.0, 36245.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

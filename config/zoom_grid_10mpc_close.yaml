@@ -1,0 +1,7 @@
+# Deep zoom tier 5: 2 cMpc/h xy slab with a 10 Mpc LOS depth.
+name: zoom_close
+center: [4093.16, 23556.48, 10679.74]
+size: [2000.0, 2000.0, 10000.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

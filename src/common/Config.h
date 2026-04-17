@@ -6,8 +6,10 @@
 struct GridConfig {
     std::string name;
     Vec3 center;       // in code units (ckpc/h)
-    double side;       // in code units (ckpc/h)
-    int resolution;
+    // Anisotropic size / resolution. For a cube, all three are equal.
+    // If the yaml provides scalar `side`/`resolution`, they are replicated.
+    Vec3 size;         // sx, sy, sz in code units (ckpc/h)
+    int shape[3];      // Nx, Ny, Nz
     std::vector<std::string> fields;
 };
 
@@ -20,6 +22,10 @@ struct CameraConfig {
     double ortho_width;   // code units, orthographic only
     int image_width;
     int image_height;
+    // Optional LOS slab: if > 0, clip ray integration to a slab of this
+    // thickness (in code units) centered on look_at along the camera forward
+    // axis. 0 (default) disables and uses the full grid depth.
+    double los_slab = 0.0;
 };
 
 struct ProjectionConfig {

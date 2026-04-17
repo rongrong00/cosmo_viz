@@ -1,0 +1,7 @@
+# 10 cMpc/h cube around largest FOF halo for a camera orbit, 1024^3 => cell 9.77 ckpc/h.
+name: orbit
+center: [4093.16, 23556.48, 10679.74]
+side: 10000.0
+resolution: 1024
+fields:
+  - gas_density

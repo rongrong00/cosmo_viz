@@ -1,0 +1,7 @@
+# Deep zoom tier 7: 0.6 cMpc/h xy slab with a 10 Mpc LOS depth.
+name: zoom_t6
+center: [4093.16, 23556.48, 10679.74]
+size: [600.0, 600.0, 10000.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

@@ -48,7 +48,7 @@ add_executable(renderer
     src/renderer/RayTracer.cpp
     src/renderer/ImageWriter.cpp
 )
-target_link_libraries(renderer PRIVATE common)
+target_link_libraries(renderer PRIVATE common MPI::MPI_CXX)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(renderer PRIVATE OpenMP::OpenMP_CXX)
 endif()

@@ -4,6 +4,10 @@
 #include <sstream>
 #include <iomanip>
 #include <filesystem>
+#include <algorithm>
+#include <cstring>
+#include <vector>
+#include <map>
 #include "common/Config.h"
 #include "gridder/SnapshotReader.h"
 #include "gridder/Grid.h"
@@ -23,9 +27,20 @@ static void printUsage(const char* prog) {
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
-    int rank, nranks;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+    int world_rank, world_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    // One sub-communicator per shared-memory domain (= one per node on
+    // typical systems). Ranks on the same node will share a single grid
+    // buffer allocated with MPI_Win_allocate_shared, so N ranks per node
+    // do not each hold a full copy of the grid.
+    MPI_Comm node_comm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0,
+                        MPI_INFO_NULL, &node_comm);
+    int node_rank, node_size;
+    MPI_Comm_rank(node_comm, &node_rank);
+    MPI_Comm_size(node_comm, &node_size);
 
     // Parse command line
     std::string snapshot_path, config_path, output_dir;
@@ -37,106 +52,131 @@ int main(int argc, char** argv) {
     }
 
     if (snapshot_path.empty() || config_path.empty() || output_dir.empty()) {
-        if (rank == 0) printUsage(argv[0]);
+        if (world_rank == 0) printUsage(argv[0]);
         MPI_Finalize();
         return 1;
     }
 
-    if (rank == 0) fs::create_directories(output_dir);
+    if (world_rank == 0) fs::create_directories(output_dir);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Read header
     SnapshotHeader header = SnapshotReader::readHeader(snapshot_path);
-    if (rank == 0) {
+    if (world_rank == 0) {
         std::cout << "Snapshot: BoxSize=" << header.boxsize
                   << " z=" << header.redshift
                   << " NumFiles=" << header.num_files
                   << " NumGas=" << header.num_part_total[0]
                   << " NumDM=" << header.num_part_total[1]
                   << std::endl;
+        std::cout << "MPI: " << world_size << " ranks across "
+                  << (world_size / node_size) << " nodes, "
+                  << node_size << " ranks/node (shared-mem grid)"
+                  << std::endl;
     }
 
-    // Parse grid config
     GridConfig gcfg = parseGridConfig(config_path);
-    if (rank == 0) {
+    if (world_rank == 0) {
         std::cout << "Grid: name=" << gcfg.name
                   << " center=(" << gcfg.center.x << "," << gcfg.center.y << "," << gcfg.center.z << ")"
-                  << " side=" << gcfg.side
-                  << " res=" << gcfg.resolution
+                  << " size=(" << gcfg.size.x << "," << gcfg.size.y << "," << gcfg.size.z << ")"
+                  << " shape=(" << gcfg.shape[0] << "," << gcfg.shape[1] << "," << gcfg.shape[2] << ")"
                   << " fields:";
         for (const auto& f : gcfg.fields) std::cout << " " << f;
         std::cout << std::endl;
     }
 
-    // Check which particle types we need
     bool need_gas = false, need_dm = false;
     for (const auto& f : gcfg.fields) {
         if (f == "gas_density" || f == "temperature" || f == "metallicity" ||
-            f == "HII_density" || f == "gas_velocity") {
-            need_gas = true;
-        }
-        if (f == "dm_density") {
-            need_dm = true;
-        }
+            f == "HII_density" || f == "gas_velocity") need_gas = true;
+        if (f == "dm_density") need_dm = true;
     }
 
-    // Allocate grid
-    Grid grid(gcfg.center, gcfg.side, gcfg.resolution, gcfg.fields);
+    // --- Allocate shared-memory buffers, one per field, on each node. ---
+    const size_t total_cells = static_cast<size_t>(gcfg.shape[0])
+                             * static_cast<size_t>(gcfg.shape[1])
+                             * static_cast<size_t>(gcfg.shape[2]);
+    auto field_list = Grid::allocatedFieldNames(gcfg.fields);
 
-    // Process subfiles round-robin
-    for (int fi = rank; fi < header.num_files; fi += nranks) {
+    std::vector<MPI_Win> wins;
+    std::map<std::string, double*> buffers;
+    for (const auto& name : field_list) {
+        MPI_Aint bytes = (node_rank == 0) ?
+            static_cast<MPI_Aint>(total_cells * sizeof(double)) : 0;
+        double* ptr = nullptr;
+        MPI_Win win;
+        MPI_Win_allocate_shared(bytes, sizeof(double), MPI_INFO_NULL,
+                                node_comm, &ptr, &win);
+        if (node_rank != 0) {
+            MPI_Aint qsize; int qdisp;
+            MPI_Win_shared_query(win, 0, &qsize, &qdisp, &ptr);
+        } else {
+            std::memset(ptr, 0, total_cells * sizeof(double));
+        }
+        buffers[name] = ptr;
+        wins.push_back(win);
+    }
+    MPI_Barrier(node_comm);
+
+    Grid grid(gcfg.center, gcfg.size,
+              gcfg.shape[0], gcfg.shape[1], gcfg.shape[2],
+              gcfg.fields, buffers);
+
+    // Round-robin subfiles across all world ranks. Within a node, multiple
+    // ranks concurrently deposit into the same shared buffer (atomic adds
+    // in Depositor keep it correct).
+    for (int fi = world_rank; fi < header.num_files; fi += world_size) {
         std::string subfile = SnapshotReader::subfilePath(snapshot_path, fi);
-        std::cout << "Rank " << rank << " reading subfile " << fi << std::endl;
+        std::cout << "Rank " << world_rank << " reading subfile " << fi << std::endl;
 
         if (need_gas) {
             auto gas = SnapshotReader::readGasParticles(subfile, header.boxsize);
-            std::cout << "  Rank " << rank << " subfile " << fi
+            std::cout << "  Rank " << world_rank << " subfile " << fi
                       << ": " << gas.size() << " gas particles" << std::endl;
             Depositor::depositGas(grid, gas, header.boxsize);
         }
 
         if (need_dm) {
             auto dm = SnapshotReader::readDMParticles(subfile, header.boxsize);
-            std::cout << "  Rank " << rank << " subfile " << fi
+            std::cout << "  Rank " << world_rank << " subfile " << fi
                       << ": " << dm.size() << " DM particles" << std::endl;
-            // Compute smoothing lengths
             SmoothingLength::computeKNN(dm, header.boxsize);
             Depositor::depositDM(grid, dm, header.boxsize);
         }
     }
 
-    // MPI_Reduce all field buffers to rank 0
-    size_t grid_size = grid.totalCells();
-    if (nranks > 1) {
-        // Gather all field names (including mass_weight and velocity components)
-        std::vector<std::string> all_fields;
-        for (const auto& f : gcfg.fields) {
-            if (f == "gas_velocity") {
-                all_fields.push_back("gas_velocity_x");
-                all_fields.push_back("gas_velocity_y");
-                all_fields.push_back("gas_velocity_z");
-            } else {
-                all_fields.push_back(f);
-            }
-        }
-        all_fields.push_back("mass_weight");
+    MPI_Barrier(MPI_COMM_WORLD);
 
-        for (const auto& fname : all_fields) {
-            if (!grid.hasField(fname)) continue;
-            if (rank == 0) {
-                std::vector<double> global(grid_size, 0.0);
-                MPI_Reduce(grid.fieldData(fname), global.data(), grid_size,
-                           MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-                grid.field(fname) = std::move(global);
-            } else {
-                MPI_Reduce(grid.fieldData(fname), nullptr, grid_size,
-                           MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    // Reduce across *node leaders* only. Each node already holds a single
+    // fully-summed buffer, so this scales as (num_nodes - 1) * grid_bytes.
+    MPI_Comm leader_comm = MPI_COMM_NULL;
+    int leader_color = (node_rank == 0) ? 0 : MPI_UNDEFINED;
+    MPI_Comm_split(MPI_COMM_WORLD, leader_color, world_rank, &leader_comm);
+
+    if (node_rank == 0) {
+        int n_leaders = 0;
+        MPI_Comm_size(leader_comm, &n_leaders);
+        if (n_leaders > 1) {
+            std::vector<double> recv;
+            if (world_rank == 0) recv.resize(total_cells);
+            for (const auto& name : field_list) {
+                double* send = buffers[name];
+                if (world_rank == 0) {
+                    MPI_Reduce(send, recv.data(), total_cells,
+                               MPI_DOUBLE, MPI_SUM, 0, leader_comm);
+                    std::memcpy(send, recv.data(), total_cells * sizeof(double));
+                } else {
+                    MPI_Reduce(send, nullptr, total_cells,
+                               MPI_DOUBLE, MPI_SUM, 0, leader_comm);
+                }
             }
         }
     }
 
-    // Normalize and write on rank 0
-    if (rank == 0) {
+    if (leader_comm != MPI_COMM_NULL) MPI_Comm_free(&leader_comm);
+
+    // Write on global rank 0.
+    if (world_rank == 0) {
         grid.normalizeIntensiveFields();
 
         int snap_num = 0;
@@ -154,6 +194,11 @@ int main(int argc, char** argv) {
                        header.boxsize, header.hubble_param,
                        header.omega0, header.omega_lambda);
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    for (auto& w : wins) MPI_Win_free(&w);
+    MPI_Comm_free(&node_comm);
 
     MPI_Finalize();
     return 0;

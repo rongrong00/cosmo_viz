@@ -75,6 +75,24 @@ std::vector<float> HDF5Reader::readDatasetFloat(const std::string& name) {
     return data;
 }
 
+void HDF5Reader::readDatasetFloatInto(const std::string& name, float* out, size_t expected_n) {
+    hid_t did = H5Dopen2(file_id_, name.c_str(), H5P_DEFAULT);
+    if (did < 0) throw std::runtime_error("Cannot open dataset: " + name);
+    hid_t space = H5Dget_space(did);
+    int ndims = H5Sget_simple_extent_ndims(space);
+    std::vector<hsize_t> dims(ndims);
+    H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+    hsize_t total = 1;
+    for (auto d : dims) total *= d;
+    if (total != expected_n) {
+        H5Sclose(space); H5Dclose(did);
+        throw std::runtime_error("Dataset size mismatch for " + name);
+    }
+    H5Dread(did, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, out);
+    H5Sclose(space);
+    H5Dclose(did);
+}
+
 std::vector<double> HDF5Reader::readDatasetDouble(const std::string& name) {
     hid_t did = H5Dopen2(file_id_, name.c_str(), H5P_DEFAULT);
     if (did < 0) throw std::runtime_error("Cannot open dataset: " + name);

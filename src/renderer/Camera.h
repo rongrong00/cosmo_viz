@@ -17,13 +17,21 @@ public:
     int height() const { return height_; }
     const Vec3& forward() const { return forward_; }
 
+    double losSlab() const { return los_slab_; }
+    // If los_slab > 0, returns [t0, t1] along the ray for the slab of thickness
+    // los_slab_ centered on look_at along the camera forward axis. Returns
+    // {-inf, +inf} if slab is disabled.
+    void slabTRange(const Ray& ray, double& t0, double& t1) const;
+
 private:
     Vec3 position_;
+    Vec3 look_at_;
     Vec3 forward_;
     Vec3 right_;
     Vec3 up_;
     std::string type_;
     double fov_rad_;
     double ortho_width_;
+    double los_slab_;
     int width_, height_;
 };

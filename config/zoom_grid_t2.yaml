@@ -1,0 +1,9 @@
+# Zoom tier 2: 15 cMpc/h xy slab, full-box LOS (z = 36245 ckpc/h = box).
+# Tall-in-z so background structure doesn't vanish as we zoom in.
+# 1024x1024x1024 => cell_xy = 14.65 ckpc/h, cell_z = 35.40 ckpc/h.
+name: zoom_t2
+center: [4093.16, 23556.48, 10679.74]
+size: [15000.0, 15000.0, 36245.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density

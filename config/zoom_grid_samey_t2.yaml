@@ -1,0 +1,7 @@
+# Same-y tier 2: 15 cMpc/h xy with full-box z.
+name: zoom_t2
+center: [4093.16, 23556.48, 10679.74]
+size: [15000.0, 15000.0, 36245.0]
+resolution: [1024, 1024, 1024]
+fields:
+  - gas_density
