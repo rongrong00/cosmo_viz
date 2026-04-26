@@ -1,0 +1,37 @@
+#!/bin/bash
+#SBATCH -A AST211
+#SBATCH -J sph_s2_persp
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH -c 32
+#SBATCH -t 01:30:00
+#SBATCH -p batch
+#SBATCH -o output/sph_set2_persp_%j.out
+#SBATCH -e output/sph_set2_persp_%j.err
+
+module load hdf5
+cd /lustre/orion/ast211/proj-shared/rongrong/lumina_visualization/cosmo_viz
+
+export OMP_NUM_THREADS=32
+export OMP_PLACES=cores
+export OMP_PROC_BIND=close
+
+# z=10 (snap_050) — visible bubble structure.
+SNAP=/lustre/orion/ast211/proj-shared/EDE_Final/finalTest/50cMpc_2/output/snapdir_050/snap_050
+REGION=config/zoom_region_10mpc.yaml
+CAMERA=config/sph_cam_persp.yaml
+OUTDIR=output/sph_set2_persp_z10
+
+mkdir -p "$OUTDIR"
+
+srun -n 1 -c ${OMP_NUM_THREADS} --cpu-bind=threads \
+    ./build/sph_renderer \
+    --snapshot "$SNAP" \
+    --region   "$REGION" \
+    --camera   "$CAMERA" \
+    --output   "$OUTDIR" \
+    --fields   neutral_H,ionized_H,heated_gas,heavy_elements \
+    --supersample 3
+
+echo "=== DONE ==="
+ls -la "$OUTDIR"

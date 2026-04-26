@@ -146,12 +146,18 @@ def main():
             dpi = 120
             figsize = (data.shape[1] / dpi, data.shape[0] / dpi)
             fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+            fig.patch.set_facecolor('black'); ax.set_facecolor('black')
+            # Full-bleed: axes fill the canvas so no dark rim around the image.
+            ax.set_position([0.0, 0.0, 1.0, 1.0])
+            ax.set_axis_off()
             ax.imshow(dp, cmap=cmap, norm=LogNorm(vmin=lvmin, vmax=lvmax),
                       origin='upper', interpolation='nearest')
             theta_deg = math.degrees(2.0 * math.pi * i / args.frames)
-            ax.set_title(f'orbit: {theta_deg:5.1f} deg', color='white', fontsize=12)
-            ax.set_xticks([]); ax.set_yticks([])
-            ax.set_facecolor('black'); fig.patch.set_facecolor('black')
+            ax.text(0.015, 0.985, f'orbit: {theta_deg:5.1f} deg',
+                    transform=ax.transAxes, color='white', fontsize=11,
+                    ha='left', va='top',
+                    bbox=dict(boxstyle='round,pad=0.25', facecolor='black',
+                              alpha=0.35, edgecolor='none'))
 
             # Scale bar: 20% of image width in world units
             img_w = data.shape[1]; img_h = data.shape[0]

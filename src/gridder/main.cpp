@@ -9,10 +9,10 @@
 #include <vector>
 #include <map>
 #include "common/Config.h"
-#include "gridder/SnapshotReader.h"
+#include "common/SnapshotReader.h"
+#include "common/SmoothingLength.h"
 #include "gridder/Grid.h"
 #include "gridder/Depositor.h"
-#include "gridder/SmoothingLength.h"
 
 namespace fs = std::filesystem;
 

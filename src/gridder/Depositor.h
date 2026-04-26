@@ -1,6 +1,6 @@
 #pragma once
 #include "gridder/Grid.h"
-#include "gridder/SnapshotReader.h"
+#include "common/SnapshotReader.h"
 #include <vector>
 
 class Depositor {

@@ -33,6 +33,18 @@ struct ProjectionConfig {
     std::string mode;  // "column", "mass_weighted", etc.
 };
 
+// Region selection for the direct SPH ray tracer. No resolution — the SPH
+// renderer operates on particles directly.
+struct RegionConfig {
+    std::string name;
+    Vec3 center;                            // code units (ckpc/h)
+    Vec3 size;                              // full extents per axis
+    double radius = 0.0;                    // if > 0, use spherical cull of this radius (code units); overrides size
+    std::vector<std::string> particle_types; // subset of {"gas", "dm"}; default: ["gas"]
+    double margin = 0.0;                    // extra halo (code units) beyond 2*h_max auto cull
+};
+
 GridConfig parseGridConfig(const std::string& filename);
 CameraConfig parseCameraConfig(const std::string& filename);
 std::vector<ProjectionConfig> parseProjectionConfigs(const std::string& filename);
+RegionConfig parseRegionConfig(const std::string& filename);

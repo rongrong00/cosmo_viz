@@ -39,6 +39,11 @@ public:
                                                       double boxsize);
     static std::vector<DMParticle> readDMParticles(const std::string& subfile_path,
                                                     double boxsize);
+    // Reads PartType4 (stars) and packs into the DMParticle struct
+    // (same fields: pos, mass, hsml). Masses are per-particle from the
+    // snapshot; hsml is set to 0 (compute via kNN later).
+    static std::vector<DMParticle> readStarsAsDM(const std::string& subfile_path,
+                                                  double boxsize);
     static int getNumFiles(const std::string& snapshot_path);
     static std::string subfilePath(const std::string& snapshot_path, int file_index);
 };

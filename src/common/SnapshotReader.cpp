@@ -1,4 +1,4 @@
-#include "gridder/SnapshotReader.h"
+#include "common/SnapshotReader.h"
 #include "common/HDF5IO.h"
 #include "common/Constants.h"
 #include <cmath>
@@ -163,5 +163,47 @@ std::vector<DMParticle> SnapshotReader::readDMParticles(const std::string& subfi
     // hsml will be set later via kNN
     for (uint64_t i = 0; i < ndm; i++) particles[i].hsml = 0.0f;
 
+    return particles;
+}
+
+std::vector<DMParticle> SnapshotReader::readStarsAsDM(const std::string& subfile_path,
+                                                      double boxsize) {
+    HDF5Reader reader(subfile_path);
+
+    auto npart = reader.readAttrUint64Array("Header", "NumPart_ThisFile");
+    uint64_t nstar = npart.size() > 4 ? npart[4] : 0;
+    if (nstar == 0) return {};
+
+    std::vector<DMParticle> particles(nstar);
+
+    bool has_int_coords = reader.datasetExists("PartType4/IntCoordinates");
+    if (has_int_coords) {
+        auto icoords = reader.readDatasetUint32("PartType4/IntCoordinates");
+        for (uint64_t i = 0; i < nstar; i++) {
+            particles[i].pos.x = static_cast<double>(icoords[i * 3 + 0]) *
+                                 Constants::INTCOORD_SCALE * boxsize;
+            particles[i].pos.y = static_cast<double>(icoords[i * 3 + 1]) *
+                                 Constants::INTCOORD_SCALE * boxsize;
+            particles[i].pos.z = static_cast<double>(icoords[i * 3 + 2]) *
+                                 Constants::INTCOORD_SCALE * boxsize;
+        }
+    } else {
+        auto coords = reader.readDatasetFloat("PartType4/Coordinates");
+        for (uint64_t i = 0; i < nstar; i++) {
+            particles[i].pos.x = coords[i * 3 + 0];
+            particles[i].pos.y = coords[i * 3 + 1];
+            particles[i].pos.z = coords[i * 3 + 2];
+        }
+    }
+
+    // PartType4 Masses are always per-particle (variable mass).
+    if (reader.datasetExists("PartType4/Masses")) {
+        auto masses = reader.readDatasetFloat("PartType4/Masses");
+        for (uint64_t i = 0; i < nstar; i++) particles[i].mass = masses[i];
+    } else {
+        for (uint64_t i = 0; i < nstar; i++) particles[i].mass = 0.0f;
+    }
+
+    for (uint64_t i = 0; i < nstar; i++) particles[i].hsml = 0.0f;
     return particles;
 }

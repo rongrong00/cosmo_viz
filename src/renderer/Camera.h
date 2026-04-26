@@ -12,6 +12,9 @@ public:
     Camera(const CameraConfig& config);
 
     Ray generateRay(int px, int py) const;
+    // Subpixel-offset variant: dx,dy ∈ [0,1], with (0.5,0.5) reproducing the
+    // pixel-center ray. Used by supersampling anti-aliasing.
+    Ray generateRay(int px, int py, double dx, double dy) const;
 
     int width() const { return width_; }
     int height() const { return height_; }

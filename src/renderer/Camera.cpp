@@ -44,12 +44,16 @@ void Camera::slabTRange(const Ray& ray, double& t0, double& t1) const {
 }
 
 Ray Camera::generateRay(int px, int py) const {
+    return generateRay(px, py, 0.5, 0.5);
+}
+
+Ray Camera::generateRay(int px, int py, double dx, double dy) const {
     Ray ray;
 
     if (type_ == "orthographic") {
         double aspect = static_cast<double>(width_) / height_;
-        double offset_x = (2.0 * (px + 0.5) / width_ - 1.0) * ortho_width_ / 2.0 * aspect;
-        double offset_y = (1.0 - 2.0 * (py + 0.5) / height_) * ortho_width_ / 2.0;
+        double offset_x = (2.0 * (px + dx) / width_ - 1.0) * ortho_width_ / 2.0 * aspect;
+        double offset_y = (1.0 - 2.0 * (py + dy) / height_) * ortho_width_ / 2.0;
 
         ray.origin = position_ + right_ * offset_x + up_ * offset_y;
         ray.dir = forward_;
@@ -57,8 +61,8 @@ Ray Camera::generateRay(int px, int py) const {
         // Perspective
         double aspect = static_cast<double>(width_) / height_;
         double tan_half_fov = std::tan(fov_rad_ / 2.0);
-        double ndc_x = (2.0 * (px + 0.5) / width_ - 1.0) * aspect * tan_half_fov;
-        double ndc_y = (1.0 - 2.0 * (py + 0.5) / height_) * tan_half_fov;
+        double ndc_x = (2.0 * (px + dx) / width_ - 1.0) * aspect * tan_half_fov;
+        double ndc_y = (1.0 - 2.0 * (py + dy) / height_) * tan_half_fov;
 
         Vec3 dir_cam(ndc_x, ndc_y, 1.0); // forward is +z in camera space
         ray.origin = position_;

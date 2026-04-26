@@ -184,6 +184,39 @@ CameraConfig parseCameraConfig(const std::string& filename) {
     return cam;
 }
 
+RegionConfig parseRegionConfig(const std::string& filename) {
+    auto kvs = readKVFile(filename);
+    RegionConfig r;
+    r.name = getVal(kvs, "name", "region");
+    if (r.name.size() >= 2 && r.name.front() == '"')
+        r.name = r.name.substr(1, r.name.size() - 2);
+
+    auto c = parseArray(getVal(kvs, "center", "[0,0,0]"));
+    if (c.size() != 3)
+        throw std::runtime_error("region `center` must be a 3-element array");
+    r.center = Vec3(c[0], c[1], c[2]);
+
+    r.radius = std::stod(getVal(kvs, "radius", "0"));
+    std::string size_str = getVal(kvs, "size", "");
+    if (!size_str.empty()) {
+        auto sv = parseArray(size_str);
+        if (sv.size() != 3)
+            throw std::runtime_error("region `size` must be a 3-element array");
+        r.size = Vec3(sv[0], sv[1], sv[2]);
+    } else if (r.radius > 0.0) {
+        // Spherical region: bounding box is the inscribing cube of side 2R.
+        double s = 2.0 * r.radius;
+        r.size = Vec3(s, s, s);
+    } else {
+        double side = std::stod(getVal(kvs, "side", "1000"));
+        r.size = Vec3(side, side, side);
+    }
+
+    r.particle_types = parseStringArray(getVal(kvs, "particle_types", "[gas]"));
+    r.margin = std::stod(getVal(kvs, "margin", "0"));
+    return r;
+}
+
 std::vector<ProjectionConfig> parseProjectionConfigs(const std::string& filename) {
     // For Phase 1, parse simple projection list from the camera config
     std::vector<ProjectionConfig> projs;
